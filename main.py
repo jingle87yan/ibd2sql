@@ -54,6 +54,10 @@ def _argparse():
 	#IBD FILE
 	parser.add_argument(dest='FILENAME', help='ibd filename', nargs='?')
 
+	parser.add_argument("filepath", help="文件夹路径")
+	parser.add_argument("type", help="脚本类型[0:只有表结构，1只有表数据，2表与数据都有]")
+	parser.add_argument("savefile", help="脚本保存文件名[]")
+
 	if parser.parse_args().VERSION:
 		#print("VERSION: v1.0 only for MySQL 8.0")
 		print(f"ibd2sql VERSION: v{__version__} for MySQL 5.7 or 8.0")
@@ -68,63 +72,59 @@ def _argparse():
 		print("ibd2sql /mysql57/db1/xxx.ibd --sdi-table /mysql80/db1/xxx.ibd --sql --mysql5")
 		print("")
 		sys.exit(0)
-
 	return parser.parse_args()
 
-if __name__ == '__main__':
+
+def process__(filename: str,ddl: bool)->(str,[]):
 	parser = _argparse()
-	#对部分默认值做处理
-	if not parser.SQL:
-		parser.DDL = True
-	filename = parser.FILENAME
+	# 对部分默认值做处理
+	# filename = parser.FILENAME
 	if not os.path.exists(filename):
-		#raise f'no file {filename}'
+		# raise f'no file {filename}'
 		sys.stderr.write(f"\nno file {filename}\n\n")
 		sys.exit(1)
-	#不管debug file了
+	# 不管debug file了
 	if parser.DEBUG_FILE is not None and os.path.exists(filename):
 		pass
 
-	#初始化一个ibd2sql对象, 然后设置它的属性
+	# 初始化一个ibd2sql对象, 然后设置它的属性
 	ddcw = ibd2sql()
-	ddcw.FILENAME = parser.FILENAME
+	ddcw.FILENAME = filename
 	# 判断keyring file
 	kd = {}
 	if parser.KEYRING_FILE != '' and os.path.exists(parser.KEYRING_FILE):
-		with open(parser.KEYRING_FILE,'rb') as f:
+		with open(parser.KEYRING_FILE, 'rb') as f:
 			kd = AES.read_keyring(f.read())
 			if len(kd) == 0:
 				sys.stderr.write(f"\nkeyring file {parser.KEYRING_FILE} is not correct\n\n")
 				sys.exit(11)
-		# 读ibd的fsp中的key和iv
-	with open(filename,'rb') as f:
+	# 读ibd的fsp中的key和iv
+	with open(filename, 'rb') as f:
 		fsp = f.read(16384)
 		if len(fsp) != 16384:
 			sys.stderr.write(f"\n ibd file {filename} is not correct\n\n")
 			sys.exit(12)
-		data = fsp[10390:10390+115]
-		if data != b'\x00'*115 and len(kd) == 0:
-			sys.stderr.write(f"\n ibd file {filename} is ENCRYPTED, please with --keyring-file='xxxxx'\n\n")
-			sys.exit(14)
-		if data != b'\x00'*115:
-			ddcw.ENCRYPTED = True # 表示有加密
-			master_id = struct.unpack('>L',data[3:7])[0]
-			server_uuid = data[7:7+36].decode()
-			kid = 'INNODBKey'+'-'+server_uuid+'-'+str(master_id)
+		data = fsp[10390:10390 + 115]
+		if data != b'\x00' * 115:
+			ddcw.ENCRYPTED = True  # 表示有加密
+			master_id = struct.unpack('>L', data[3:7])[0]
+			server_uuid = data[7:7 + 36].decode()
+			kid = 'INNODBKey' + '-' + server_uuid + '-' + str(master_id)
 			if kid not in kd:
 				sys.stderr.write(f"\n ibd'key not in keyring file({parser.KEYRING_FILE})\n\n")
 				sys.exit(13)
-			master_key = kd['INNODBKey'+'-'+server_uuid+'-'+str(master_id)]['key']
-			key_info = AES.aes_ecb256_decrypt(master_key,data[43:43+32*2])
+			master_key = kd['INNODBKey' + '-' + server_uuid + '-' + str(master_id)]['key']
+			key_info = AES.aes_ecb256_decrypt(master_key, data[43:43 + 32 * 2])
 			# 这个key_info可能不对, 所以我们计算下CRC32C
-			if struct.unpack('>L',fsp[10390:10390+115][-8:-4])[0] != CRC32C.crc32c(key_info):
-				sys.stderr.write(f"\n keyring file({parser.KEYRING_FILE}) 里面确实包含对应的key({kid}), 但TM不对啊. 估计是指定的新/旧的keyring文件了.\n\n")
+			if struct.unpack('>L', fsp[10390:10390 + 115][-8:-4])[0] != CRC32C.crc32c(key_info):
+				sys.stderr.write(
+					f"\n keyring file({parser.KEYRING_FILE}) 里面确实包含对应的key({kid}), 但TM不对啊. 估计是指定的新/旧的keyring文件了.\n\n")
 				sys.exit(15)
 			key = key_info[:32]
 			iv = key_info[32:48]
 			ddcw.KEY = key
 			ddcw.IV = iv
-			
+
 	if parser.DEBUG:
 		ddcw.DEBUG = True
 	if parser.SDI_TABLE:
@@ -134,7 +134,7 @@ if __name__ == '__main__':
 
 	ddcw.COMPLETE_SQL = True if parser.COMPLETE_INSERT else False
 
-	#基础过滤信息
+	# 基础过滤信息
 	ddcw.REPLACE = True if parser.REPLACE else False
 	if parser.PAGE_COUNT:
 		ddcw.PAGE_COUNT = parser.PAGE_COUNT
@@ -149,7 +149,7 @@ if __name__ == '__main__':
 	if parser.FORCE:
 		ddcw.FORCE = parser.FORCE
 
-	#替换分区表的SDI信息
+	# 替换分区表的SDI信息
 	if parser.SDI_TABLE:
 		ddcw.IS_PARTITION = True
 		aa = ibd2sql()
@@ -159,9 +159,8 @@ if __name__ == '__main__':
 		ddcw._init_table_name()
 		aa.close()
 
-
 	if parser.DEBUG_FILE is not None:
-		f = open(parser.DEBUG_FILE,'a')
+		f = open(parser.DEBUG_FILE, 'a')
 		ddcw.DEBUG = True
 		ddcw.DEBUG_FD = f
 
@@ -170,21 +169,162 @@ if __name__ == '__main__':
 
 	if parser.SET:
 		ddcw.SET = True
-	
+
 	if parser.MULTI_VALUE:
 		ddcw.MULTIVALUE = True
 
-	#条件
+	# 条件
 	if parser.WHERE_TRX:
-		_a = [ int(x) for x in parser.WHERE_TRX.split(',')]
+		_a = [int(x) for x in parser.WHERE_TRX.split(',')]
 		ddcw.WHERE2 = _a[:2]
 
 	if parser.WHERE_ROLLPTR:
-		_a = [ int(x) for x in parser.WHERE_ROLLPTR.split(',')]
+		_a = [int(x) for x in parser.WHERE_ROLLPTR.split(',')]
 		ddcw.WHERE3 = _a[:2]
 
+	# 初始化, 解析表
+	ddcw.init()
+	if parser.TABLE_NAME:
+		ddcw.replace_name(parser.TABLE_NAME)
+	if parser.SCHEMA_NAME:
+		ddcw.replace_schema(parser.SCHEMA_NAME)
 
-	#初始化, 解析表
+	create_sql = ddcw.get_ddl()
+
+	ddcw.MULTIVALUE = True if parser.MULTI_VALUE and not parser.REPLACE else False
+	ddcw.REPLACE = True if parser.REPLACE else False
+	ddcw.LIMIT = parser.LIMIT if parser.LIMIT else -1
+	sqls=[]
+	if ddl and ddcw.table.row_format in ['DYNAMIC', 'COMPACT']:
+		sqls=ddcw.get_sql_back()
+	elif not ddcw.table.row_format in ['DYNAMIC', 'COMPACT']:
+		sys.stderr.write(f"\nNot support row format. {ddcw.table.row_format}\n\n")
+
+	# 记得关闭相关FD
+	ddcw.close()
+	if parser.DEBUG_FILE is not None:
+		try:
+			f.close()
+		except:
+			pass
+	return create_sql, sqls
+
+
+def process():
+	parser = _argparse()
+	print(f"parser.SQL=========== {parser.SQL}")
+	# 对部分默认值做处理
+	if not parser.SQL:
+		parser.DDL = True
+	filename = parser.FILENAME
+	if not os.path.exists(filename):
+		# raise f'no file {filename}'
+		sys.stderr.write(f"\nno file {filename}\n\n")
+		sys.exit(1)
+	# 不管debug file了
+	if parser.DEBUG_FILE is not None and os.path.exists(filename):
+		pass
+
+	# 初始化一个ibd2sql对象, 然后设置它的属性
+	ddcw = ibd2sql()
+	ddcw.FILENAME = parser.FILENAME
+	# 判断keyring file
+	kd = {}
+	if parser.KEYRING_FILE != '' and os.path.exists(parser.KEYRING_FILE):
+		with open(parser.KEYRING_FILE, 'rb') as f:
+			kd = AES.read_keyring(f.read())
+			if len(kd) == 0:
+				sys.stderr.write(f"\nkeyring file {parser.KEYRING_FILE} is not correct\n\n")
+				sys.exit(11)
+	# 读ibd的fsp中的key和iv
+	print(f"filename===== {filename}")
+	with open(filename, 'rb') as f:
+		fsp = f.read(16384)
+		if len(fsp) != 16384:
+			sys.stderr.write(f"\n ibd file {filename} is not correct\n\n")
+			sys.exit(12)
+		data = fsp[10390:10390 + 115]
+		if data != b'\x00' * 115 and len(kd) == 0:
+			sys.stderr.write(f"\n ibd file {filename} is ENCRYPTED, please with --keyring-file='xxxxx'\n\n")
+			sys.exit(14)
+		if data != b'\x00' * 115:
+			ddcw.ENCRYPTED = True  # 表示有加密
+			master_id = struct.unpack('>L', data[3:7])[0]
+			server_uuid = data[7:7 + 36].decode()
+			kid = 'INNODBKey' + '-' + server_uuid + '-' + str(master_id)
+			if kid not in kd:
+				sys.stderr.write(f"\n ibd'key not in keyring file({parser.KEYRING_FILE})\n\n")
+				sys.exit(13)
+			master_key = kd['INNODBKey' + '-' + server_uuid + '-' + str(master_id)]['key']
+			key_info = AES.aes_ecb256_decrypt(master_key, data[43:43 + 32 * 2])
+			# 这个key_info可能不对, 所以我们计算下CRC32C
+			if struct.unpack('>L', fsp[10390:10390 + 115][-8:-4])[0] != CRC32C.crc32c(key_info):
+				sys.stderr.write(
+					f"\n keyring file({parser.KEYRING_FILE}) 里面确实包含对应的key({kid}), 但TM不对啊. 估计是指定的新/旧的keyring文件了.\n\n")
+				sys.exit(15)
+			key = key_info[:32]
+			iv = key_info[32:48]
+			ddcw.KEY = key
+			ddcw.IV = iv
+
+	if parser.DEBUG:
+		ddcw.DEBUG = True
+	if parser.SDI_TABLE:
+		ddcw.IS_PARTITION = True
+
+	ddcw.MYSQL5 = parser.MYSQL5
+
+	ddcw.COMPLETE_SQL = True if parser.COMPLETE_INSERT else False
+
+	# 基础过滤信息
+	ddcw.REPLACE = True if parser.REPLACE else False
+	if parser.PAGE_COUNT:
+		ddcw.PAGE_COUNT = parser.PAGE_COUNT
+	if parser.PAGE_MIN:
+		ddcw.PAGE_MIN = parser.PAGE_MIN
+	if parser.PAGE_MAX:
+		ddcw.PAGE_MAX = parser.PAGE_MAX
+	if parser.PAGE_START:
+		ddcw.PAGE_START = parser.PAGE_START
+	if parser.PAGE_SKIP:
+		ddcw.PAGE_SKIP = parser.PAGE_SKIP
+	if parser.FORCE:
+		ddcw.FORCE = parser.FORCE
+
+	# 替换分区表的SDI信息
+	if parser.SDI_TABLE:
+		ddcw.IS_PARTITION = True
+		aa = ibd2sql()
+		aa.FILENAME = parser.SDI_TABLE
+		aa.init()
+		ddcw.table = aa.table
+		ddcw._init_table_name()
+		aa.close()
+
+	if parser.DEBUG_FILE is not None:
+		f = open(parser.DEBUG_FILE, 'a')
+		ddcw.DEBUG = True
+		ddcw.DEBUG_FD = f
+
+	if parser.DELETED:
+		ddcw.DELETE = True
+
+	if parser.SET:
+		ddcw.SET = True
+
+	if parser.MULTI_VALUE:
+		ddcw.MULTIVALUE = True
+
+	# 条件
+	if parser.WHERE_TRX:
+		_a = [int(x) for x in parser.WHERE_TRX.split(',')]
+		ddcw.WHERE2 = _a[:2]
+
+	if parser.WHERE_ROLLPTR:
+		_a = [int(x) for x in parser.WHERE_ROLLPTR.split(',')]
+		ddcw.WHERE3 = _a[:2]
+
+	# 初始化, 解析表
 	ddcw.init()
 
 	if parser.TABLE_NAME:
@@ -196,20 +336,25 @@ if __name__ == '__main__':
 	if parser.DDL:
 		print(ddcw.get_ddl())
 
-	
 	ddcw.MULTIVALUE = True if parser.MULTI_VALUE and not parser.REPLACE else False
 	ddcw.REPLACE = True if parser.REPLACE else False
 	ddcw.LIMIT = parser.LIMIT if parser.LIMIT else -1
-	if parser.SQL and ddcw.table.row_format in ['DYNAMIC','COMPACT']:
+	if parser.SQL and ddcw.table.row_format in ['DYNAMIC', 'COMPACT']:
 		ddcw.get_sql()
-	elif not ddcw.table.row_format in ['DYNAMIC','COMPACT']:
+	elif not ddcw.table.row_format in ['DYNAMIC', 'COMPACT']:
 		sys.stderr.write(f"\nNot support row format. {ddcw.table.row_format}\n\n")
 
-
-	#记得关闭相关FD
+	# 记得关闭相关FD
 	ddcw.close()
 	if parser.DEBUG_FILE is not None:
 		try:
 			f.close()
 		except:
 			pass
+
+
+if __name__ == '__main__':
+	#process()
+	create_sql,insert_sql=process__("F://devops//data//zlg@002dshow//biz_goods.ibd",True)
+	print(f"create_sql={create_sql}")
+	print(f"insert_sql={insert_sql}")
